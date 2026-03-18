@@ -3,14 +3,16 @@ package service
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/sun1tar/MIREA-TIP-Practice-30/tech-ip-sem2/shared/middleware"
+	"github.com/sun1tar/MIREA-TIP-Practice-30/tech-ip-sem2/shared/models" // shared models для JobMessage
 	"github.com/sun1tar/MIREA-TIP-Practice-30/tech-ip-sem2/tasks/internal/cache"
-	"github.com/sun1tar/MIREA-TIP-Practice-30/tech-ip-sem2/tasks/internal/models"
+	tasksModels "github.com/sun1tar/MIREA-TIP-Practice-30/tech-ip-sem2/tasks/internal/models" // алиас для моделей задач
 	"github.com/sun1tar/MIREA-TIP-Practice-30/tech-ip-sem2/tasks/internal/rabbit"
 	"github.com/sun1tar/MIREA-TIP-Practice-30/tech-ip-sem2/tasks/internal/repository"
 )
@@ -43,12 +45,13 @@ func sanitizeInput(input string) string {
 	return replacer.Replace(input)
 }
 
-func (s *TaskService) Create(ctx context.Context, title, description, dueDate string) (*models.Task, error) {
+// Create - создание новой задачи
+func (s *TaskService) Create(ctx context.Context, title, description, dueDate string) (*tasksModels.Task, error) {
 	// Санитизация входных данных
 	title = sanitizeInput(title)
 	description = sanitizeInput(description)
 
-	task := &models.Task{
+	task := &tasksModels.Task{
 		ID:          "t_" + uuid.New().String(),
 		Title:       title,
 		Description: description,
@@ -99,7 +102,8 @@ func (s *TaskService) Create(ctx context.Context, title, description, dueDate st
 	return task, nil
 }
 
-func (s *TaskService) GetByID(ctx context.Context, id string) (*models.Task, error) {
+// GetByID - получение задачи по ID
+func (s *TaskService) GetByID(ctx context.Context, id string) (*tasksModels.Task, error) {
 	// Пытаемся получить из кэша
 	task, err := s.cache.GetTask(ctx, id)
 	if err != nil {
@@ -134,7 +138,7 @@ func (s *TaskService) GetByID(ctx context.Context, id string) (*models.Task, err
 }
 
 // getFromDB получает задачу из БД
-func (s *TaskService) getFromDB(ctx context.Context, id string) (*models.Task, error) {
+func (s *TaskService) getFromDB(ctx context.Context, id string) (*tasksModels.Task, error) {
 	task, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -145,12 +149,14 @@ func (s *TaskService) getFromDB(ctx context.Context, id string) (*models.Task, e
 	return task, nil
 }
 
-func (s *TaskService) List(ctx context.Context) ([]*models.Task, error) {
+// List - получение списка задач
+func (s *TaskService) List(ctx context.Context) ([]*tasksModels.Task, error) {
 	s.log.Debug("listing tasks from database")
 	return s.repo.List(ctx)
 }
 
-func (s *TaskService) Update(ctx context.Context, id string, title, description, dueDate *string, done *bool) (*models.Task, error) {
+// Update - обновление задачи
+func (s *TaskService) Update(ctx context.Context, id string, title, description, dueDate *string, done *bool) (*tasksModels.Task, error) {
 	// Сначала получаем существующую задачу
 	existing, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -203,6 +209,7 @@ func (s *TaskService) Update(ctx context.Context, id string, title, description,
 	return existing, nil
 }
 
+// Delete - удаление задачи
 func (s *TaskService) Delete(ctx context.Context, id string) error {
 	if err := s.repo.Delete(ctx, id); err != nil {
 		return err
@@ -231,7 +238,8 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *TaskService) SearchByTitle(ctx context.Context, query string, unsafe bool) ([]*models.Task, error) {
+// SearchByTitle - поиск задач по названию
+func (s *TaskService) SearchByTitle(ctx context.Context, query string, unsafe bool) ([]*tasksModels.Task, error) {
 	// Поиск не кэшируем, так как запросы разнообразные
 	if unsafe {
 		if postgresRepo, ok := s.repo.(*repository.PostgresTaskRepository); ok {
@@ -242,4 +250,52 @@ func (s *TaskService) SearchByTitle(ctx context.Context, query string, unsafe bo
 	query = sanitizeInput(query)
 	s.log.WithField("query", query).Debug("searching tasks in database")
 	return s.repo.SearchByTitle(ctx, query)
+}
+
+// JobResponse - ответ при создании задачи в очереди
+type JobResponse struct {
+	Job       string `json:"job"`
+	TaskID    string `json:"task_id"`
+	Attempt   int    `json:"attempt"`
+	MessageID string `json:"message_id"`
+	Status    string `json:"status"`
+}
+
+// CreateJob - создание задачи в очереди
+func (s *TaskService) CreateJob(ctx context.Context, taskID string) (*JobResponse, error) {
+	if s.producer == nil {
+		return nil, fmt.Errorf("rabbitmq producer not available")
+	}
+
+	messageID := uuid.New().String()
+
+	job := models.JobMessage{
+		Job:       "process_task",
+		TaskID:    taskID,
+		Attempt:   1,
+		MessageID: messageID,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	// Публикуем в очередь task_jobs
+	if err := s.producer.PublishJob(ctx, job); err != nil {
+		s.log.WithError(err).WithFields(logrus.Fields{
+			"task_id":    taskID,
+			"message_id": messageID,
+		}).Error("failed to publish job")
+		return nil, err
+	}
+
+	s.log.WithFields(logrus.Fields{
+		"task_id":    taskID,
+		"message_id": messageID,
+	}).Info("job published to queue")
+
+	return &JobResponse{
+		Job:       job.Job,
+		TaskID:    job.TaskID,
+		Attempt:   job.Attempt,
+		MessageID: job.MessageID,
+		Status:    "queued",
+	}, nil
 }

@@ -6,18 +6,26 @@ import (
 )
 
 type Config struct {
-	RabbitMQURL   string
-	QueueName     string
-	PrefetchCount int
-	LogLevel      string
+	RabbitMQURL       string
+	MainQueue         string
+	RetryQueue        string
+	DLQ               string
+	PrefetchCount     int
+	MaxAttempts       int
+	RetryDelaySeconds int
+	LogLevel          string
 }
 
 func Load() *Config {
 	return &Config{
-		RabbitMQURL:   getEnv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
-		QueueName:     getEnv("RABBITMQ_QUEUE", "task_events"),
-		PrefetchCount: getEnvAsInt("RABBITMQ_PREFETCH", 1),
-		LogLevel:      getEnv("LOG_LEVEL", "info"),
+		RabbitMQURL:       getEnv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
+		MainQueue:         getEnv("MAIN_QUEUE", "task_jobs"),
+		RetryQueue:        getEnv("RETRY_QUEUE", "task_jobs_retry"),
+		DLQ:               getEnv("DLQ", "task_jobs_dlq"),
+		PrefetchCount:     getEnvAsInt("RABBITMQ_PREFETCH", 1),
+		MaxAttempts:       getEnvAsInt("MAX_ATTEMPTS", 3),
+		RetryDelaySeconds: getEnvAsInt("RETRY_DELAY_SECONDS", 10),
+		LogLevel:          getEnv("LOG_LEVEL", "info"),
 	}
 }
 

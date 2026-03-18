@@ -18,13 +18,26 @@ func main() {
 	cfg := config.Load()
 
 	logrusLogger.WithFields(map[string]interface{}{
-		"rabbitmq_url": cfg.RabbitMQURL,
-		"queue":        cfg.QueueName,
-		"prefetch":     cfg.PrefetchCount,
-	}).Info("starting worker service")
+		"rabbitmq_url":        cfg.RabbitMQURL,
+		"main_queue":          cfg.MainQueue,
+		"retry_queue":         cfg.RetryQueue,
+		"dlq":                 cfg.DLQ,
+		"prefetch":            cfg.PrefetchCount,
+		"max_attempts":        cfg.MaxAttempts,
+		"retry_delay_seconds": cfg.RetryDelaySeconds,
+	}).Info("starting worker service with retry and DLQ")
 
 	// Подключаемся к RabbitMQ
-	consumer, err := rabbit.NewConsumer(cfg.RabbitMQURL, cfg.QueueName, cfg.PrefetchCount, logrusLogger)
+	consumer, err := rabbit.NewConsumer(
+		cfg.RabbitMQURL,
+		cfg.MainQueue,
+		cfg.RetryQueue,
+		cfg.DLQ,
+		cfg.PrefetchCount,
+		cfg.MaxAttempts,
+		cfg.RetryDelaySeconds,
+		logrusLogger,
+	)
 	if err != nil {
 		logrusLogger.WithError(err).Fatal("failed to create consumer")
 	}
@@ -40,6 +53,8 @@ func main() {
 		}
 	}()
 
+	logrusLogger.Info("Worker initialized and waiting for jobs. Press Ctrl+C to exit.")
+
 	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -47,6 +62,6 @@ func main() {
 	logrusLogger.Info("Shutting down worker...")
 
 	cancel()
-	time.Sleep(1 * time.Second) // Даём время завершить обработку
+	time.Sleep(2 * time.Second) // Даём время завершить обработку
 	logrusLogger.Info("worker exited")
 }

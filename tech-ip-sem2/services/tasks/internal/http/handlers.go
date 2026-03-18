@@ -352,3 +352,51 @@ func (h *TaskHandler) SearchTasks(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Instance-ID", h.instanceID)
 	json.NewEncoder(w).Encode(toTaskResponses(tasks))
 }
+
+// CreateJobHandler обрабатывает POST /v1/jobs/process-task
+func (h *TaskHandler) CreateJobHandler(w http.ResponseWriter, r *http.Request) {
+	requestID := middleware.GetRequestID(r.Context())
+	logEntry := h.logger.WithFields(logrus.Fields{
+		"component":   "http_handler",
+		"handler":     "CreateJobHandler",
+		"request_id":  requestID,
+		"instance_id": h.instanceID,
+	})
+
+	if !h.verifySession(w, r) {
+		return
+	}
+
+	var req struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logEntry.WithError(err).Warn("invalid request body")
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.TaskID == "" {
+		logEntry.Warn("task_id is required")
+		http.Error(w, `{"error":"task_id is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Создаём задачу в очереди
+	job, err := h.taskService.CreateJob(r.Context(), req.TaskID)
+	if err != nil {
+		logEntry.WithError(err).Error("failed to create job")
+		http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	logEntry.WithFields(logrus.Fields{
+		"task_id":    req.TaskID,
+		"message_id": job.MessageID,
+	}).Info("job created successfully")
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Instance-ID", h.instanceID)
+	w.WriteHeader(http.StatusAccepted) // 202 Accepted - задача принята в очередь
+	json.NewEncoder(w).Encode(job)
+}

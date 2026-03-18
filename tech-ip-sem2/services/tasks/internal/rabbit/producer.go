@@ -8,6 +8,7 @@ import (
 
 	"github.com/rabbitmq/amqp091-go"
 	"github.com/sirupsen/logrus"
+	"github.com/sun1tar/MIREA-TIP-Practice-30/tech-ip-sem2/shared/models"
 )
 
 type Producer struct {
@@ -86,7 +87,7 @@ func (p *Producer) PublishTaskCreated(ctx context.Context, taskID, title, reques
 		false,   // immediate
 		amqp091.Publishing{
 			ContentType:  "application/json",
-			DeliveryMode: amqp091.Persistent, // сообщения сохраняются на диск
+			DeliveryMode: amqp091.Persistent,
 			Timestamp:    time.Now(),
 			Body:         body,
 		})
@@ -99,6 +100,41 @@ func (p *Producer) PublishTaskCreated(ctx context.Context, taskID, title, reques
 		"queue":      p.queue,
 		"request_id": requestID,
 	}).Info("task.created event published")
+
+	return nil
+}
+
+// PublishJob публикует задачу в основную очередь task_jobs
+func (p *Producer) PublishJob(ctx context.Context, job models.JobMessage) error {
+	body, err := json.Marshal(job)
+	if err != nil {
+		return fmt.Errorf("failed to marshal job: %w", err)
+	}
+
+	// Публикуем в очередь task_jobs (основная очередь задач)
+	err = p.channel.PublishWithContext(ctx,
+		"",          // exchange
+		"task_jobs", // routing key (queue name)
+		true,        // mandatory
+		false,       // immediate
+		amqp091.Publishing{
+			ContentType:  "application/json",
+			DeliveryMode: amqp091.Persistent,
+			MessageId:    job.MessageID,
+			Timestamp:    time.Now(),
+			Body:         body,
+		})
+	if err != nil {
+		return fmt.Errorf("failed to publish job: %w", err)
+	}
+
+	p.logger.WithFields(logrus.Fields{
+		"job":        job.Job,
+		"task_id":    job.TaskID,
+		"message_id": job.MessageID,
+		"attempt":    job.Attempt,
+		"queue":      "task_jobs",
+	}).Info("job published to main queue")
 
 	return nil
 }

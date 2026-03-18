@@ -139,8 +139,12 @@ services:
     container_name: worker-service
     environment:
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      RABBITMQ_QUEUE: task_events
+      MAIN_QUEUE: task_jobs
+      RETRY_QUEUE: task_jobs_retry
+      DLQ: task_jobs_dlq
       RABBITMQ_PREFETCH: 1
+      MAX_ATTEMPTS: 3
+      RETRY_DELAY_SECONDS: 10
       LOG_LEVEL: debug
     depends_on:
       rabbitmq:

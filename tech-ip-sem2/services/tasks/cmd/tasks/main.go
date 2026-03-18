@@ -109,6 +109,11 @@ func main() {
 	mux.HandleFunc("PATCH /v1/tasks/{id}", taskHandler.UpdateTask)
 	mux.HandleFunc("DELETE /v1/tasks/{id}", taskHandler.DeleteTask)
 	mux.HandleFunc("GET /v1/tasks/search", taskHandler.SearchTasks)
+
+	// Job endpoints (очередь задач)
+	mux.HandleFunc("POST /v1/jobs/process-task", taskHandler.CreateJobHandler)
+
+	// Metrics
 	mux.Handle("GET /metrics", metricsMiddleware.MetricsHandler())
 
 	// Цепочка middleware
